@@ -7,7 +7,6 @@ import requests
 
 import os
 import re
-# import sys
 import json
 import sqlite3
 import shutil
@@ -17,12 +16,9 @@ import logging
 from datetime import datetime
 
 try:
-    # python >= 3.4
-    import asyncio
-    async_module = True
+    from concurrent.futures import ThreadPoolExecutor
 except ImportError:
-    # python 2.7
-    async_module = False
+    from tpool import ThreadPoolExecutor
 
 
 def lmap(f, *args):
@@ -76,6 +72,11 @@ class CratesMirror(object):
 
         if not os.path.isdir(self.cratesDir):
             os.makedirs(self.cratesDir)
+        
+        if not os.listdir(self.cratesDir):
+            self._bare = True
+        else:
+            self._bare = False
 
         dbpath = os.path.join(os.getcwd(), "crates.db")
         self.conn = self.initialize_db(dbpath)
@@ -235,19 +236,6 @@ class CratesMirror(object):
 
         """
 
-        # def compute_hash(res):
-            # """
-            # Compute SHA256 checksum of response content
-
-            # :param res: requests.Response class
-            # :returns: SHA256 hexdigest of the content
-
-            # """
-            # validator = hashlib.sha256()
-            # for chunk in res.iter_content(chunk_size=1024**2):
-                # validator.update(chunk)
-            # return validator.hexdigest()
-
         def dl_executor(url, cksum, fp):
             """
             Download and verify the checksum of file
@@ -259,7 +247,7 @@ class CratesMirror(object):
 
             """
 
-            if os.path.isfile(fp):
+            if not self._bare and os.path.isfile(fp):
                 with open(fp, 'rb') as toverify:
                     if hashlib.sha256(toverify.read()).hexdigest() == cksum:
                         return True, None
@@ -268,7 +256,7 @@ class CratesMirror(object):
                 return False, None
 
             try:
-                dlfile = requests.get(url, timeout=10, proxies=self.proxy, stream=True)
+                dlfile = requests.get(url, timeout=10, proxies=self.proxy)
             except Exception as e:
                 self.logger.error(e)
                 return False, None
@@ -298,10 +286,6 @@ class CratesMirror(object):
 
             url = self.downloadURL.format(name=name, version=vers)
 
-            # with (yield from sem):
-                # # $sem is defined below
-                # # download $sem files at a time
-                # downloaded, forbidden = yield from dl_executor(url, cksum, fp)
             downloaded, forbidden = dl_executor(url, cksum, fp)
 
             try:
@@ -317,24 +301,24 @@ class CratesMirror(object):
             except Exception as e:
                 self.logger.error(e)
 
+
+        def retrive_crate_multithread(info):
+
+            with ThreadPoolExecutor() as pool:
+                pool.map(lambda x: dl_executor(*x), info)
+                pool.shutdown(wait=True)
+
+            self.load_downloaded_crates()
+
+
         cursor = self.conn.cursor()
         cursor.execute("SELECT name, version, checksum FROM crate WHERE downloaded = 0 AND forbidden = 0")
-        for t in cursor:
-            retrive_crate(*t)
 
-        # loop = asyncio.get_event_loop()
-
-        # sem = asyncio.Semaphore(max_corou)
-
-        # if sys.version_info < (3, ):
-            # pass
-        # elif sys.version_info > (3, 4, 3):
-            # loop.run_until_complete(asyncio.wait([asyncio.ensure_future(retrive_crate(*t)) for t in cursor]))
-        # elif sys.version_info > (3, 4, 0):
-            # loop.run_until_complete(asyncio.wait([asyncio.async(retrive_crate(*t)) for t in cursor]))
-        # else:
-            # raise Exception('Unsupport python version')
-        # loop.close()
+        if self._bare:
+            retrive_crate_multithread(cursor)
+            self._bare = False
+        else:
+            lmap(lambda t: retrive_crate(*t), cursor)
 
     def update_repo(self):
         """
@@ -432,7 +416,6 @@ if __name__ == '__main__':
     config = {'dl': 'https://crates.mirrors.ustc.edu.cn/api/v1/crates',
               'api': 'https://crates.io'}
     with CratesMirror(indexDir, cratesDir, config, debug=True) as mirror:
-        # mirror.load_all_local_crates()
         mirror.update_repo()
 
 # vim:set et sw=4 ts=4:
