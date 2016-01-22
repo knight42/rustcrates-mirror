@@ -1,14 +1,19 @@
 #!/usr/bin/python -O
 # -*- coding: utf-8 -*-
+"""
+See also 'https://hg.python.org/cpython/file/3.5/Lib/concurrent/futures/thread.py'
+         'https://hg.python.org/cpython/file/3.5/Lib/concurrent/futures/_base.py'
+"""
 
 from __future__ import print_function, unicode_literals, division
 import atexit
 import threading
+import logging
 from multiprocessing import cpu_count
 
 try:
     import queue
-except:
+except ImportError:
     import Queue as queue
 
 import weakref
@@ -16,6 +21,7 @@ import weakref
 _threads_queues = weakref.WeakKeyDictionary()
 
 _shutdown = False
+_logger = logging.getLogger('tpool').setLevel(logging.DEBUG)
 
 def _python_exit():
     global _shutdown
@@ -43,9 +49,8 @@ def _worker(executor_reference, work_queue):
                 work_queue.put(None)
                 return
             del executor
-    except Exception as e:
-        print('Exception in worker', e)
-
+    except:
+        _logger.critial('Exception in worker', exc_info=True)
 
 class _WorkItem(object):
     def __init__(self, fn, args, kwargs):
@@ -60,15 +65,18 @@ class _WorkItem(object):
             print(e)
 
 class ThreadPoolExecutor(object):
+    """
 
-    """Docstring for ThreadPool. """
+    """
 
     def __init__(self, max_workers=None):
-        """TODO: to be defined.  """
+        """
+
+        """
 
         if max_workers is None:
             max_workers = (cpu_count() or 1) * 5
-        elif max_workers < 0:
+        if max_workers < 0:
             raise ValueError("max_workers must be greater than 0")
 
         self._max_workers = max_workers
@@ -92,7 +100,6 @@ class ThreadPoolExecutor(object):
 
             self._work_queue.put(w)
             self._adjust_thread_count()
-        # return f
 
     def _adjust_thread_count(self):
         # When the executor gets lost, the weakref callback will wake up
@@ -123,8 +130,9 @@ class ThreadPoolExecutor(object):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
 
-        pass
-        
+        self.shutdown(wait=True)
+        return False
+
 
 if __name__ == '__main__':
 

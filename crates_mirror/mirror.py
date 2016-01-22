@@ -14,6 +14,7 @@ import functools
 import hashlib
 import logging
 from datetime import datetime
+from multiprocessing import cpu_count
 
 try:
     from concurrent.futures import ThreadPoolExecutor
@@ -56,10 +57,10 @@ class CratesMirror(object):
         if debug:
             self.logger.setLevel(logging.DEBUG)
         else:
-            self.logger.setLevel(logging.WARNING)
+            self.logger.setLevel(logging.INFO)
 
         ch = logging.StreamHandler()
-        formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(lineno)d %(message)s')
+        formatter = logging.Formatter('[%(asctime)s] <line: %(lineno)d> %(levelname)s: %(message)s')
         ch.setFormatter(formatter)
         self.logger.addHandler(ch)
 
@@ -69,10 +70,11 @@ class CratesMirror(object):
         self.cratesDir = cratesdir
         self.config = config
         self.configPath = os.path.join(self.indexDir, 'config.json')
+        self._session = requests.Session()
 
         if not os.path.isdir(self.cratesDir):
             os.makedirs(self.cratesDir)
-        
+
         if not os.listdir(self.cratesDir):
             self._bare = True
         else:
@@ -256,14 +258,13 @@ class CratesMirror(object):
                 return False, None
 
             try:
-                dlfile = requests.get(url, timeout=10, proxies=self.proxy)
+                dlfile = self._session.get(url, timeout=30, proxies=self.proxy)
             except Exception as e:
                 self.logger.error(e)
                 return False, None
             if dlfile.status_code == 403:
                 return False, True
 
-            # filehash = compute_hash(dlfile)
             filehash = hashlib.sha256(dlfile.content).hexdigest()
             if filehash == cksum:
                 with open(fp, 'wb') as save:
@@ -271,21 +272,31 @@ class CratesMirror(object):
                 return True, False
             return False, False
 
-        def retrive_crate(name, vers, cksum):
+        def _prepare(name, vers, cksum):
 
             self.logger.debug('Processing %s-%s', name, vers)
             if not cksum:
                 self.logger.error('Empty checksum in database: %s-%s', name, vers)
-                return
+                return (None, None)
 
             pardir = os.path.join(self.cratesDir, name)
-            if not os.path.isdir(pardir):
+            try:
                 os.makedirs(pardir)
+            except:
+                # directory already exists
+                pass
             fp = os.path.join(pardir, '{}-{}.crate'.format(name, vers))
-            sql = "UPDATE crate SET {column} = ?, last_update = ? WHERE name = ? AND version = ?"
-
             url = self.downloadURL.format(name=name, version=vers)
+            return (url, fp)
 
+        def retrive_crate(name, vers, cksum):
+
+            url, fp = _prepare(name, vers, cksum)
+
+            if not all((url, fp)):
+                return
+
+            sql = "UPDATE crate SET {column} = ?, last_update = ? WHERE name = ? AND version = ?"
             downloaded, forbidden = dl_executor(url, cksum, fp)
 
             try:
@@ -304,8 +315,16 @@ class CratesMirror(object):
 
         def retrive_crate_multithread(info):
 
-            with ThreadPoolExecutor() as pool:
-                pool.map(lambda x: dl_executor(*x), info)
+            def wrapped(t):
+
+                url, fp = _prepare(*t)
+                if not all((url, fp)):
+                    return
+                cksum = t[2]
+                dl_executor(url, cksum, fp)
+
+            with ThreadPoolExecutor(cpu_count() * 3) as pool:
+                pool.map(wrapped, info)
                 pool.shutdown(wait=True)
 
             self.load_downloaded_crates()
