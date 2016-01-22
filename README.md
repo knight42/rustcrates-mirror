@@ -6,7 +6,7 @@ Python script to save a local copy of all crates on [crates.io](https://crates.i
 This project is initially inspired by [@tennix](https://github.com/tennix)'s [crates-mirror](https://github.com/tennix/crates-mirror), and totally rewritten.
 
 ## TODO
-* [ ] download crates in a multi-threaded way if \<CratesDir> is empty
+* [x] ~~download crates in a multi-threaded way if \<CratesDir> is empty~~
 
 ## Prerequisities
 * Python >= 2.7.9
