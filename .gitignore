@@ -1,2 +1,5 @@
 crates.db
 *.swp
+*.pyo
+*.pyc
+__pycache__

@@ -1,2 +1,2 @@
-requests
-gitpython
+requests>=2.9.1
+GitPython>=1.0.1
