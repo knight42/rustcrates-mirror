@@ -1,6 +1,7 @@
 #!/usr/bin/python -O
 # -*- coding: utf-8 -*-
 from setuptools import setup, find_packages
+import re
 
 PACKAGE = "cratesmirror"
 NAME = "cratesmirror"
@@ -9,16 +10,19 @@ AUTHOR = "Knight"
 LICENSE="MIT"
 AUTHOR_EMAIL = "anonymousknight96@gmail.com"
 URL = "https://github.com/ustclug/LUG-crates_mirror"
-VERSION = __import__(PACKAGE).__version__
 
 with open('README.rst', 'r') as f:
     readme = f.read()
+
+with open('cratesmirror/__init__.py', 'r') as fd:
+    VERSION = re.search(r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]',
+                        fd.read(), re.MULTILINE).group(1)
 
 setup(
     name=NAME,
     version=VERSION,
     description=DESCRIPTION,
-     long_description=readme,
+    long_description=readme,
     author=AUTHOR,
     author_email=AUTHOR_EMAIL,
     license=LICENSE,
@@ -36,6 +40,10 @@ setup(
         'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
+    ],
+    install_requires = [
+        'requests>=2.9.1',
+        'GitPython>=1.0.1'
     ],
     zip_safe=False,
 )

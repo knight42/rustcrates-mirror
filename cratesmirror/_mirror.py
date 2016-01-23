@@ -1,4 +1,4 @@
-#!/usr/bin/python3 -O
+#!/usr/bin/python -O
 # -*- coding: utf-8 -*-
 from __future__ import print_function, unicode_literals, with_statement
 

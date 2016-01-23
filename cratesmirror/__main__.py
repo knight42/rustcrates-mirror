@@ -34,8 +34,13 @@ if __name__ == '__main__':
 
     if args.index is None:
         index = '/srv/git/index'
+    else:
+        index = args.index
+
     if args.crates is None:
         crates = '/srv/www/crates'
+    else:
+        crates = args.crates
 
     with CratesMirror(index, crates, config=custom_config,
                       dbpath=args.dbpath, logfile=args.logfile,
