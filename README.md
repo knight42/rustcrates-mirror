@@ -30,20 +30,20 @@ $ python -m cratesmirror -h
     optional arguments:
       -h, --help            show this help message and exit
       -i, --index INDEX
-                            registry index directory
+                            registry index directory (default: /srv/git/index)
       -w, --crates CRATES
-                            crates directory
+                            crates directory (default: /srv/www/crates)
       -d, --dbpath DBPATH
-                            database file path
+                            database file path (default: None)
       -f, --logfile LOGFILE
-                            log file path
+                            log file path (default: None)
       -v, --verbose
 
     Available environment variables: HTTP_PROXY, HTTPS_PROXY, CRATES_DL, CRATES_API
 
 
 $ CRATES_DL='https://crates.mirrors.ustc.edu.cn/api/v1/crates' \
-          python -m cratesmirror -i /srv/git/index -w /srv/www/crates -d /var/lib/crates/crates.db
+          python -m cratesmirror -d /var/lib/crates/crates.db -f /var/log/crates/debug.log
 ```
 Note that the first run of this script may take a while, you have to be patient.
 
