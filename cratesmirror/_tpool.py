@@ -5,10 +5,11 @@ See also 'https://hg.python.org/cpython/file/3.5/Lib/concurrent/futures/thread.p
          'https://hg.python.org/cpython/file/3.5/Lib/concurrent/futures/_base.py'
 """
 
-from __future__ import print_function, unicode_literals, division
+from __future__ import print_function, unicode_literals
 import atexit
+import weakref
 import threading
-import logging
+import traceback
 from multiprocessing import cpu_count
 
 try:
@@ -16,12 +17,9 @@ try:
 except ImportError:
     import Queue as queue
 
-import weakref
-
 _threads_queues = weakref.WeakKeyDictionary()
 
 _shutdown = False
-_logger = logging.getLogger('tpool').setLevel(logging.DEBUG)
 
 def _python_exit():
     global _shutdown
@@ -44,13 +42,17 @@ def _worker(executor_reference, work_queue):
                 continue
 
             executor = executor_reference()
+            # Exit if:
+            #   - The interpreter is shutting down OR
+            #   - The executor that owns the worker has been collected OR
+            #   - The executor that owns the worker has been shutdown.
             if _shutdown or executor is None or executor._shutdown:
                 # Notice other workers
                 work_queue.put(None)
                 return
             del executor
-    except:
-        _logger.critial('Exception in worker', exc_info=True)
+    except Exception:
+        traceback.print_exc()
 
 class _WorkItem(object):
     def __init__(self, fn, args, kwargs):
@@ -61,18 +63,12 @@ class _WorkItem(object):
     def run(self):
         try:
             self.fn(*self.args, **self.kwargs)
-        except Exception as e:
-            print(e)
+        except Exception:
+            traceback.print_exc()
 
 class ThreadPoolExecutor(object):
-    """
-
-    """
 
     def __init__(self, max_workers=None):
-        """
-
-        """
 
         if max_workers is None:
             max_workers = (cpu_count() or 1) * 5
@@ -138,9 +134,10 @@ if __name__ == '__main__':
 
     import time
     def test(n):
-        print('get', n)
+        print('before', n)
         time.sleep(n)
-        print('get', n**2)
+        print('after', n**2)
+        raise IndexError('1234')
 
-    with ThreadPoolExecutor() as ex:
-        pass
+    with ThreadPoolExecutor(10) as ex:
+        ex.map(test, range(5))

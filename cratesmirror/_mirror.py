@@ -19,11 +19,13 @@ from multiprocessing import cpu_count
 try:
     from concurrent.futures import ThreadPoolExecutor
 except ImportError:
-    from tpool import ThreadPoolExecutor
+    from ._tpool import ThreadPoolExecutor
 
 
 def lmap(f, *args):
     list(map(f, *args))
+
+_current_dir = os.path.dirname(os.path.realpath(__file__))
 
 
 class CratesMirror(object):
@@ -33,6 +35,8 @@ class CratesMirror(object):
     :param cratesdir: the path of directory which contains local crates
     :param config: dictinoary of settings that overrides the default. See `config.json` in your indexDir
     :param proxy: dictionary of proxy config used in requests.get. See also 'http://docs.python-requests.org/en/latest/user/advanced/#proxies'
+    :param dbpath: path of database file. <current_dir>/crates.db by default
+    :param logfile: path of log file. Write to stdout by default
     :param debug: verbose output
 
     Usage::
@@ -51,40 +55,46 @@ class CratesMirror(object):
 
     """
 
-    def __init__(self, indexdir, cratesdir, config=None, proxy=None, debug=False):
+    def __init__(self, indexdir, cratesdir, config=None,
+                 dbpath=None, logfile=None,
+                 proxy=None, debug=False):
 
-        self.logger = logging.getLogger(type(self).__name__)
+        self._logger = logging.getLogger(type(self).__name__)
         if debug:
-            self.logger.setLevel(logging.DEBUG)
+            self._logger.setLevel(logging.DEBUG)
         else:
-            self.logger.setLevel(logging.INFO)
+            self._logger.setLevel(logging.INFO)
 
-        ch = logging.StreamHandler()
+        if logfile:
+            ch = logging.FileHandler(logfile)
+        else:
+            ch = logging.StreamHandler()
         formatter = logging.Formatter('[%(asctime)s] <line: %(lineno)d> %(levelname)s: %(message)s')
         ch.setFormatter(formatter)
-        self.logger.addHandler(ch)
+        self._logger.addHandler(ch)
 
-        self.proxy = proxy
-        self.downloadURL = 'https://crates.io/api/v1/crates/{name}/{version}/download'
-        self.indexDir = indexdir
-        self.cratesDir = cratesdir
-        self.config = config
-        self.configPath = os.path.join(self.indexDir, 'config.json')
+        self._proxy = proxy
+        self._downloadURL = 'https://crates.io/api/v1/crates/{name}/{version}/download'
+        self._index_dir = indexdir
+        self._crates_dir = cratesdir
+        self._config = config
+        self._configPath = os.path.join(self._index_dir, 'config.json')
         self._session = requests.Session()
 
-        if not os.path.isdir(self.cratesDir):
-            os.makedirs(self.cratesDir)
+        if not os.path.isdir(self._crates_dir):
+            os.makedirs(self._crates_dir)
 
-        if not os.listdir(self.cratesDir):
+        if not os.listdir(self._crates_dir):
             self._bare = True
         else:
             self._bare = False
 
-        dbpath = os.path.join(os.getcwd(), "crates.db")
-        self.conn = self.initialize_db(dbpath)
-        self.cursor = self.conn.cursor()
+        if dbpath is None:
+            dbpath = os.path.join(os.getcwd(), "crates.db")
+        self._conn = self.initialize_db(dbpath)
+        self._cursor = self._conn.cursor()
 
-        self.repo = self.initialize_repo()
+        self._repo = self.initialize_repo()
 
     def initialize_db(self, dbpath):
         """
@@ -128,10 +138,10 @@ class CratesMirror(object):
 
         """
 
-        if not os.path.isdir(self.indexDir):
-            self.logger.warning('Cloning from GitHub, which may take a while.')
-            git.Repo.clone_from('https://github.com/rust-lang/crates.io-index', self.indexDir)
-        return git.Repo(self.indexDir)
+        if not os.path.isdir(self._index_dir):
+            self._logger.warning('Cloning from GitHub, which may take a while.')
+            git.Repo.clone_from('https://github.com/rust-lang/crates.io-index', self._index_dir)
+        return git.Repo(self._index_dir)
 
     def load_crate(self, fp, latest_only=False):
         """
@@ -163,21 +173,21 @@ class CratesMirror(object):
             try:
                 crate = json.loads(line)
             except:
-                self.logger.error("Unknown data in %s: %s", fp, line)
+                self._logger.error("Unknown data in %s: %s", fp, line)
             else:
-                self.logger.debug('Load %s, %s, %s, %s',
+                self._logger.debug('Load %s, %s, %s, %s',
                                   crate["name"], crate["vers"],
                                   crate["cksum"], int(crate["yanked"]))
                 crates.append((crate["name"], crate["vers"],
                                crate["cksum"], int(crate["yanked"])))
 
         try:
-            self.cursor.executemany(sql, crates)
+            self._cursor.executemany(sql, crates)
         except Exception as e:
-            self.logger.error(e)
+            self._logger.error(e)
             return False
         else:
-            self.conn.commit()
+            self._conn.commit()
             return True
 
     def load_crates_from_index(self, force=False):
@@ -192,12 +202,12 @@ class CratesMirror(object):
 
         """
 
-        self.cursor.execute("SELECT count(id) FROM crate;")
-        if not force and self.cursor.fetchone()[0] != 0:
+        self._cursor.execute("SELECT count(id) FROM crate;")
+        if not force and self._cursor.fetchone()[0] != 0:
             # info already loaded
             return
 
-        for root, dirs, files in os.walk(self.indexDir):
+        for root, dirs, files in os.walk(self._index_dir):
             if '.git' in dirs:
                 dirs.remove('.git')
 
@@ -214,19 +224,19 @@ class CratesMirror(object):
         """
 
         pat = re.compile('(.+)-(\d+\..+).crate')
-        for root, dirs, files in os.walk(self.cratesDir):
+        for root, dirs, files in os.walk(self._crates_dir):
             for f in files:
                 if not pat.search(f):
-                    self.logger.error('Failed to extract name and version from %s', f)
+                    self._logger.error('Failed to extract name and version from %s', f)
                     continue
                 name, vers = pat.search(f).groups()
                 try:
-                    self.cursor.execute("UPDATE crate SET downloaded = ?, last_update = ? WHERE name = ? AND version = ?", (1, datetime.now(), name, vers))
+                    self._cursor.execute("UPDATE crate SET downloaded = ?, last_update = ? WHERE name = ? AND version = ?", (1, datetime.now(), name, vers))
                 except Exception as e:
-                    self.logger.error(e)
+                    self._logger.error(e)
                 else:
-                    self.logger.debug('Info of %s-%s updated', name, vers)
-                    self.conn.commit()
+                    self._logger.debug('Info of %s-%s updated', name, vers)
+                    self._conn.commit()
 
     def retrive_crates(self):
         """
@@ -258,9 +268,9 @@ class CratesMirror(object):
                 return False, None
 
             try:
-                dlfile = self._session.get(url, timeout=30, proxies=self.proxy)
+                dlfile = self._session.get(url, timeout=30, proxies=self._proxy)
             except Exception as e:
-                self.logger.error(e)
+                self._logger.error(e)
                 return False, None
             if dlfile.status_code == 403:
                 return False, True
@@ -272,26 +282,26 @@ class CratesMirror(object):
                 return True, False
             return False, False
 
-        def _prepare(name, vers, cksum):
+        def prepare(name, vers, cksum):
 
-            self.logger.debug('Processing %s-%s', name, vers)
+            self._logger.debug('Processing %s-%s', name, vers)
             if not cksum:
-                self.logger.error('Empty checksum in database: %s-%s', name, vers)
+                self._logger.error('Empty checksum in database: %s-%s', name, vers)
                 return (None, None)
 
-            pardir = os.path.join(self.cratesDir, name)
+            pardir = os.path.join(self._crates_dir, name)
             try:
                 os.makedirs(pardir)
             except:
                 # directory already exists
                 pass
             fp = os.path.join(pardir, '{}-{}.crate'.format(name, vers))
-            url = self.downloadURL.format(name=name, version=vers)
+            url = self._downloadURL.format(name=name, version=vers)
             return (url, fp)
 
         def retrive_crate(name, vers, cksum):
 
-            url, fp = _prepare(name, vers, cksum)
+            url, fp = prepare(name, vers, cksum)
 
             if not all((url, fp)):
                 return
@@ -301,23 +311,22 @@ class CratesMirror(object):
 
             try:
                 if forbidden:
-                    self.cursor.execute(sql.format(column="forbidden"),
+                    self._cursor.execute(sql.format(column="forbidden"),
                                         (1, datetime.now(), name, vers))
-                    self.logger.warning('%s-%s is forbidden', name, vers)
+                    self._logger.warning('%s-%s is forbidden', name, vers)
                 else:
-                    self.cursor.execute(sql.format(column="downloaded"),
+                    self._cursor.execute(sql.format(column="downloaded"),
                                         (int(downloaded), datetime.now(), name, vers))
-                    self.logger.info('Successfully download %s-%s' if downloaded
+                    self._logger.info('Successfully download %s-%s' if downloaded
                                      else 'Failed to download %s-%s', name, vers)
             except Exception as e:
-                self.logger.error(e)
-
+                self._logger.error(e)
 
         def retrive_crate_multithread(info):
 
             def wrapped(t):
 
-                url, fp = _prepare(*t)
+                url, fp = prepare(*t)
                 if not all((url, fp)):
                     return
                 cksum = t[2]
@@ -329,8 +338,7 @@ class CratesMirror(object):
 
             self.load_downloaded_crates()
 
-
-        cursor = self.conn.cursor()
+        cursor = self._conn.cursor()
         cursor.execute("SELECT name, version, checksum FROM crate WHERE downloaded = 0 AND forbidden = 0")
 
         if self._bare:
@@ -349,44 +357,44 @@ class CratesMirror(object):
         """
 
         def reset_head():
-            if list(self.repo.iter_commits('origin/master..master')):
+            if list(self._repo.iter_commits('origin/master..master')):
                 # local branch is ahead of origin/master
-                self.repo.head.reset('origin/master')
+                self._repo.head.reset('origin/master')
 
         def commit_custom_config():
-            if not self.config:
+            if not self._config:
                 return
-            with open(self.configPath, 'w') as save:
-                json.dump(self.config, save, indent=4)
-            self.repo.index.add([self.configPath])
-            self.repo.index.commit('point to local server')
+            with open(self._configPath, 'w') as save:
+                json.dump(self._config, save, indent=4)
+            self._repo.index.add([self._configPath])
+            self._repo.index.commit('point to local server')
 
-        self.cursor.execute("SELECT commit_id FROM update_history ORDER BY datetime(timestamp) DESC LIMIT 1")
-        last_update = self.cursor.fetchone()
+        self._cursor.execute("SELECT commit_id FROM update_history ORDER BY datetime(timestamp) DESC LIMIT 1")
+        last_update = self._cursor.fetchone()
         if not last_update:
             # bare repo
             reset_head()
             self.retrive_crates()
-            self.cursor.execute("INSERT OR REPLACE INTO update_history (commit_id, timestamp) VALUES (?, ?)",
-                                (str(self.repo.commit()), datetime.now()))
-            self.conn.commit()
+            self._cursor.execute("INSERT OR REPLACE INTO update_history (commit_id, timestamp) VALUES (?, ?)",
+                                (str(self._repo.commit()), datetime.now()))
+            self._conn.commit()
             commit_custom_config()
             return
         else:
             last_update = last_update[0]
 
-        self.logger.debug("Last commit: %s", last_update)
+        self._logger.debug("Last commit: %s", last_update)
 
         reset_head()
 
-        origin = self.repo.remotes['origin']
-        self.logger.info("Pulling from remote...")
+        origin = self._repo.remotes['origin']
+        self._logger.info("Pulling from remote...")
         origin.pull()
-        self.logger.debug("Lastest commit: %s", self.repo.commit())
+        self._logger.debug("Lastest commit: %s", self._repo.commit())
         deletedList = []
         newfileList = []
         modifiedList = []
-        diffs = self.repo.commit(last_update).diff(self.repo.commit())
+        diffs = self._repo.commit(last_update).diff(self._repo.commit())
         for diff in diffs:
             if diff.new_file:
                 newfileList.append(diff.b_blob.abspath)
@@ -398,26 +406,26 @@ class CratesMirror(object):
             else:
                 modifiedList.append(diff.a_blob.abspath)
 
-        self.logger.debug('deleted: %s', deletedList)
-        self.logger.debug('newfiles: %s', newfileList)
-        self.logger.debug('modified: %s', modifiedList)
+        self._logger.debug('deleted: %s', deletedList)
+        self._logger.debug('newfiles: %s', newfileList)
+        self._logger.debug('modified: %s', modifiedList)
         if deletedList:
-            self.cursor.executemany("DELETE FROM crate WHERE name = ?", deletedList)
-            self.conn.commit()
+            self._cursor.executemany("DELETE FROM crate WHERE name = ?", deletedList)
+            self._conn.commit()
 
         lmap(self.load_crate, newfileList)
         lmap(functools.partial(self.load_crate, latest_only=True), modifiedList)
 
         self.retrive_crates()
 
-        lmap(shutil.rmtree, [os.path.join(self.cratesDir, f[0]) for f in deletedList])
+        lmap(shutil.rmtree, [os.path.join(self._crates_dir, f[0]) for f in deletedList])
 
-        self.cursor.execute("INSERT OR REPLACE INTO update_history (commit_id, timestamp) VALUES (?, ?)",
-                            (str(self.repo.commit()), datetime.now()))
+        self._cursor.execute("INSERT OR REPLACE INTO update_history (commit_id, timestamp) VALUES (?, ?)",
+                            (str(self._repo.commit()), datetime.now()))
 
         commit_custom_config()
 
-        self.conn.commit()
+        self._conn.commit()
 
     def __enter__(self):
 
@@ -426,15 +434,18 @@ class CratesMirror(object):
 
     def __exit__(self, exc_type, exc_value, tb):
 
-        self.conn.close()
+        self._conn.close()
+        return False
 
 if __name__ == '__main__':
 
-    indexDir = '/srv/git/index'
-    cratesDir = '/srv/www/crates'
+    index_dir = '/srv/git/index'
+    crates_dir = '/srv/www/crates'
     config = {'dl': 'https://crates.mirrors.ustc.edu.cn/api/v1/crates',
               'api': 'https://crates.io'}
-    with CratesMirror(indexDir, cratesDir, config, debug=True) as mirror:
+    logfile = os.path.join('/var/log/crates-mirror', 'debug.log')
+    dbpath = os.path.join('/var/lib/crates-mirror', 'crates.db')
+    with CratesMirror(index_dir, crates_dir, dbpath=dbpath, logfile=logfile, config=config, debug=True) as mirror:
         mirror.update_repo()
 
-# vim:set et sw=4 ts=4:
+# vim:set sta et sw=4 ts=4:
