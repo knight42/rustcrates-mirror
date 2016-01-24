@@ -3,7 +3,7 @@
 ## Introduction
 Python script to save a local copy of all crates on [crates.io](https://crates.io/) and keep track of the upstream for [USTC mirrors](http://mirrors.ustc.edu.cn/).
 
-This project is initially inspired by [@tennix](https://github.com/tennix)'s [crates-mirror](https://github.com/tennix/crates-mirror), and totally rewritten.
+This project is initially inspired by [@tennix](https://github.com/tennix)'s [crates-mirror](https://github.com/tennix/crates-mirror), and totally rewritten. You can find it on [pypi](https://pypi.python.org/pypi/cratesmirror/1.0.3).
 
 ## TODO
 * [x] ~~download crates in a multi-threaded way if \<CratesDir> is empty~~
