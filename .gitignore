@@ -1,5 +1,6 @@
 crates.db
 *.swp
-*.pyo
-*.pyc
-__pycache__
+*.py[oc]
+__pycache__/
+dist/
+build/
