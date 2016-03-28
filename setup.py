@@ -30,7 +30,7 @@ setup(
     packages=find_packages(exclude=["tests.*", "tests"]),
     classifiers=[
         "Development Status :: 3 - Alpha",
-        "Environment :: Web Environment",
+        "Environment :: Console",
         "Intended Audience :: Developers",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
@@ -43,7 +43,12 @@ setup(
     ],
     install_requires = [
         'requests>=2.9.1',
-        'GitPython>=1.0.1'
+        'GitPython>=1.0.2'
     ],
     zip_safe=False,
+    entry_points={
+        'console_scripts':[
+            'cratesmirror = cratesmirror.__main__:main'
+        ]
+    }
 )

@@ -5,8 +5,8 @@ import os
 import argparse
 from ._mirror import CratesMirror
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(prog='crates-mirror',
+def main():
+    parser = argparse.ArgumentParser(prog='cratesmirror',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                                      epilog='''Available environment variables: HTTP_PROXY, HTTPS_PROXY, CRATES_DL, CRATES_API''')
     parser.add_argument('-i', '--index', help='registry index directory', default='/srv/git/index')
@@ -28,3 +28,5 @@ if __name__ == '__main__':
                       debug=args.verbose) as mirror:
         mirror.update_repo()
 
+if __name__ == '__main__':
+    main()

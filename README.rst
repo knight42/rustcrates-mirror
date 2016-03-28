@@ -19,7 +19,7 @@ Installation
 
 ::
 
-    $ pip install cratesmirror
+    # pip install cratesmirror
 
 
 Usage
@@ -52,6 +52,6 @@ Or use it in CLI
 
 ::
 
-    $ python -m cratesmirror -h
+    $ cratesmirror -h
 
 

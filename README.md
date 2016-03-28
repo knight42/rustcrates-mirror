@@ -3,7 +3,7 @@
 ## Introduction
 Python script to save a local copy of all crates on [crates.io](https://crates.io/) and keep track of the upstream for [USTC mirrors](http://mirrors.ustc.edu.cn/).
 
-This project is initially inspired by [@tennix](https://github.com/tennix)'s [crates-mirror](https://github.com/tennix/crates-mirror), and totally rewritten. You can find it on [pypi](https://pypi.python.org/pypi/cratesmirror/1.0.3).
+This project is initially inspired by [@tennix](https://github.com/tennix)'s [crates-mirror](https://github.com/tennix/crates-mirror), and totally rewritten. You can find it on [pypi](https://pypi.python.org/pypi/cratesmirror/1.0.4).
 
 ## TODO
 * [x] ~~download crates in a multi-threaded way if \<CratesDir> is empty~~
@@ -22,10 +22,10 @@ This project is initially inspired by [@tennix](https://github.com/tennix)'s [cr
 
 ## Quick Start
 ```
-$ pip install cratesmirror
-$ python -m cratesmirror -h
+# pip install cratesmirror
+$ cratesmirror -h
 
-    usage: crates-mirror [-h] [-i INDEX] [-w CRATES] [-d DBPATH] [-f LOGFILE] [-v]
+    usage: cratesmirror [-h] [-i INDEX] [-w CRATES] [-d DBPATH] [-f LOGFILE] [-v]
 
     optional arguments:
       -h, --help            show this help message and exit
@@ -43,7 +43,7 @@ $ python -m cratesmirror -h
 
 
 $ CRATES_DL='https://crates.mirrors.ustc.edu.cn/api/v1/crates' \
-          python -m cratesmirror -d /var/lib/crates/crates.db -f /var/log/crates/debug.log
+      cratesmirror -d /var/lib/crates/crates.db -f /var/log/crates/debug.log
 ```
 Note that the first run of this script may take a while, you have to be patient.
 
@@ -54,5 +54,5 @@ After that, all you need to do is to run this script periodically using crontab-
 You have to pass the proxy setting via ENV:
 ```
 $ HTTP_PROXY="http://127.0.0.1:8080" HTTPS_PROXY="https://127.0.0.1:8081" \
-          python -m cratesmirror -i /srv/git/index -w /srv/www/crates -d /var/lib/crates/crates.db
+      cratesmirror -i /srv/git/index -w /srv/www/crates -d /var/lib/crates/crates.db
 ```
