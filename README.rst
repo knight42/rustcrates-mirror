@@ -54,4 +54,19 @@ Or use it in CLI
 
     $ cratesmirror -h
 
+    usage: cratesmirror [-h] [-i INDEX] [-w CRATES] [-d DBPATH] [-f LOGFILE] [-v]
+
+    optional arguments:
+      -h, --help            show this help message and exit
+      -i, --index INDEX
+                            registry index directory (default: /srv/git/index)
+      -w, --crates CRATES
+                            crates directory (default: /srv/www/crates)
+      -d, --dbpath DBPATH
+                            database file path (default: None)
+      -f, --logfile LOGFILE
+                            log file path (default: None)
+      -v, --verbose
+
+    Available environment variables: HTTP_PROXY, HTTPS_PROXY, CRATES_DL, CRATES_API
 
