@@ -21,11 +21,7 @@ try:
 except ImportError:
     from ._tpool import ThreadPoolExecutor
 
-
-def foreach(f, *args):
-    list(map(f, *args))
-
-_current_dir = os.path.dirname(os.path.realpath(__file__))
+from ._utils import walk_git, gen_lines, foreach
 
 class MyProgressPrinter(git.RemoteProgress):
 
@@ -77,7 +73,7 @@ class CratesMirror(object):
             ch = logging.FileHandler(logfile)
         else:
             ch = logging.StreamHandler()
-        formatter = logging.Formatter('[%(asctime)s] <line: %(lineno)d> %(levelname)s: %(message)s')
+        formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
         ch.setFormatter(formatter)
         self._logger.addHandler(ch)
 
@@ -177,26 +173,11 @@ class CratesMirror(object):
 
         """
 
-        def gen_lines():
-            with open(fp, 'r') as json_file:
-                if latest_only:
-                    last_line = ''
-                    for line in json_file:
-                        if line.strip():
-                            last_line = line
-                    yield last_line
-                else:
-                    # yield from filter(lambda x: x.strip(), json_file)
-                    for line in json_file:
-                        if line.strip():
-                            yield line
-
         crates = []
-        sql = "INSERT OR REPLACE INTO crate (name, version, checksum, yanked) VALUES (?, ?, ?, ?);"
-        for line in gen_lines():
+        for line in gen_lines(fp, latest_only):
             try:
                 crate = json.loads(line)
-            except:
+            except ValueError:
                 self._logger.error("[CRATE] Unknown data in %s: %s", fp, line)
             else:
                 self._logger.info('[DATABASE] Load %s, %s, %s, %s',
@@ -205,14 +186,7 @@ class CratesMirror(object):
                 crates.append((crate["name"], crate["vers"],
                                crate["cksum"], int(crate["yanked"])))
 
-        try:
-            self._cursor.executemany(sql, crates)
-        except Exception as e:
-            self._logger.error(e)
-            return False
-        else:
-            self._conn.commit()
-            return True
+        return self._insert_db(*crates);
 
     def load_crates_from_index(self, force=False):
         """
@@ -231,11 +205,7 @@ class CratesMirror(object):
             # info already loaded
             return
 
-        for root, dirs, files in os.walk(self._index_dir):
-            if '.git' in dirs:
-                dirs.remove('.git')
-
-            foreach(self.load_crate, [os.path.join(root, f) for f in files if f != 'config.json'])
+        foreach(self.load_crate, walk_git(self._index_dir))
 
     def load_downloaded_crates(self):
         """
@@ -316,7 +286,7 @@ class CratesMirror(object):
             pardir = os.path.join(self._crates_dir, name)
             try:
                 os.makedirs(pardir)
-            except:
+            except OSError:
                 # directory already exists
                 pass
             fp = os.path.join(pardir, '{}-{}.crate'.format(name, vers))
@@ -330,7 +300,7 @@ class CratesMirror(object):
             if not all((url, fp)):
                 return
 
-            sql = "UPDATE crate SET {column} = ?, last_update = ? WHERE name = ? AND version = ?"
+            sql = "UPDATE crate SET {column} = ?, last_update = ? WHERE name = ? AND version = ?;"
             downloaded, forbidden = dl_executor(url, cksum, fp)
 
             try:
@@ -342,7 +312,7 @@ class CratesMirror(object):
                     self._cursor.execute(sql.format(column="downloaded"),
                                         (int(downloaded), datetime.now(), name, vers))
                     self._logger.info('[CRATE] Successfully download %s-%s' if downloaded
-                                     else 'Failed to download %s-%s', name, vers)
+                                     else '[CRATE] Failed to download %s-%s', name, vers)
             except Exception as e:
                 self._logger.error(e)
 
@@ -351,10 +321,9 @@ class CratesMirror(object):
             def wrapped(t):
 
                 url, fp = prepare(*t)
-                if not all((url, fp)):
-                    return
-                cksum = t[2]
-                dl_executor(url, cksum, fp)
+                if url and fp:
+                    cksum = t[2]
+                    dl_executor(url, cksum, fp)
 
             self._logger.info('[CRATE] Downloading all crates from crates.io...')
             with ThreadPoolExecutor(cpu_count() * 3) as pool:
@@ -454,15 +423,52 @@ class CratesMirror(object):
 
         self._conn.commit()
 
-    def check_db(self):
+        self._logger.info('[REPO] Already up-to-date.')
+
+    def _insert_db(self, *crates):
+
+        sql = "INSERT OR REPLACE INTO crate (name, version, checksum, yanked) VALUES (?, ?, ?, ?);"
+        try:
+            self._cursor.executemany(sql, crates)
+        except Exception as e:
+            self._logger.error(e)
+            return False
+        else:
+            self._conn.commit()
+            return True
+
+    def findout_missing_crates(self):
         """
-        Find out crates not loaded in database
+        Find out missing crates in database
 
         :param: None
         :returns: None
 
         """
-        raise NotImplementedError
+
+        crates = []
+        query = 'SELECT name FROM crate WHERE name = ? AND version = ?;'
+        self._logger.info("[DATABASE] Checking database for missing crates, please be patient...")
+        for fp in walk_git(self._index_dir):
+            for line in gen_lines(fp):
+                try:
+                    crate = json.loads(line)
+                except ValueError:
+                    self._logger.error("[CRATE] Unknown data in %s: %s", fp, line)
+                else:
+                    # cannot execute SELECT statements in executemany()
+                    self._cursor.execute(query, (crate['name'], crate['vers']))
+                    if not self._cursor.fetchone():
+                        self._logger.error("[DATABASE] Missing crate: %s-%s",
+                                           crate['name'], crate['vers'])
+                        crates.append((crate['name'], crate['vers'],
+                                       crate['cksum'], int(crate['yanked'])))
+        missing = len(crates)
+        if crates:
+            self._logger.info("[DATABASE] The following will be inserted: %s", crates)
+            self._insert_db(*crates)
+        self._logger.info("[DATABASE] Finished. %s", '{} crates are missing'.format(missing) if missing \
+                                                else 'Everything is fine')
 
     def __enter__(self):
 
@@ -473,16 +479,5 @@ class CratesMirror(object):
 
         self._conn.close()
         return False
-
-if __name__ == '__main__':
-
-    index_dir = '/srv/git/index'
-    crates_dir = '/srv/www/crates'
-    config = {'dl': 'https://crates.mirrors.ustc.edu.cn/api/v1/crates',
-              'api': 'https://crates.io'}
-    logfile = os.path.join('/var/log/crates-mirror', 'debug.log')
-    dbpath = os.path.join('/var/lib/crates-mirror', 'crates.db')
-    with CratesMirror(index_dir, crates_dir, dbpath=dbpath, logfile=logfile, config=config, debug=True) as mirror:
-        mirror.update_repo()
 
 # vim:set sta et sw=4 ts=4:
