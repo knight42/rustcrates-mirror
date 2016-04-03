@@ -13,6 +13,8 @@ import shutil
 import functools
 import hashlib
 import logging
+import threading
+import contextlib
 from datetime import datetime
 from multiprocessing import cpu_count
 
@@ -21,7 +23,7 @@ try:
 except ImportError:
     from ._tpool import ThreadPoolExecutor
 
-from ._utils import walk_git, gen_lines, foreach
+from ._utils import walk_git, gen_lines, foreach, TaskQueue
 
 class MyProgressPrinter(git.RemoteProgress):
 
@@ -77,7 +79,6 @@ class CratesMirror(object):
         ch.setFormatter(formatter)
         self._logger.addHandler(ch)
 
-        self._bare = False
         self._proxy = proxy
         self._downloadURL = 'https://crates.io/api/v1/crates/{name}/{version}/download'
         self._index_dir = indexdir
@@ -96,14 +97,11 @@ class CratesMirror(object):
         if not os.path.isdir(self._crates_dir):
             os.makedirs(self._crates_dir)
 
-        if not os.listdir(self._crates_dir):
-            # will download all crates multi-threadedly
-            self._bare = True
-
         if dbpath is None:
             dbpath = os.path.join(os.getcwd(), "crates.db")
         elif os.path.isdir(dbpath):
             dbpath = os.path.join(dbpath, "crates.db")
+        self._dbpath = dbpath
         self._conn = self.initialize_db(dbpath)
         self._cursor = self._conn.cursor()
 
@@ -242,105 +240,90 @@ class CratesMirror(object):
 
         """
 
-        def dl_executor(url, cksum, fp):
-            """
-            Download and verify the checksum of file
+        self._logger.info('[CRATE] Downloading crates from crates.io...')
 
-            :param url: URL of the crate
-            :param cksum: the correct checksum of crate
-            :param fp: path to save crate
-            :returns: (downloaded, forbidden), both are boolean
+        self._cursor.execute("SELECT name, version, checksum FROM crate WHERE downloaded = 0 AND forbidden = 0;")
+        results = TaskQueue()
 
-            """
+        def save_result():
+            '''
+            Update database according to the download process
+            '''
 
-            if not self._bare and os.path.isfile(fp):
-                with open(fp, 'rb') as toverify:
-                    if hashlib.sha256(toverify.read()).hexdigest() == cksum:
-                        return True, False
+            sql = "UPDATE crate SET {column} = ?, last_update = ? WHERE name = ? AND version = ?;"
+            with contextlib.closing(sqlite3.connect(self._dbpath)) as conn:
+                cursor = conn.cursor()
+                for item in results:
+                    name, vers, downloaded, forbidden = item
+                    try:
+                        if forbidden:
+                            cursor.execute(sql.format(column="forbidden"),
+                                          (1, datetime.now(), name, vers))
+                            self._logger.warning('[UPSTREAM] %s-%s is forbidden', name, vers)
+                        else:
+                            cursor.execute(sql.format(column="downloaded"),
+                                          (int(downloaded), datetime.now(), name, vers))
+                    except Exception as e:
+                        self._logger.error(e)
                     else:
-                        os.remove(fp)
-                return False, False
+                        if downloaded:
+                            self._logger.info('[CRATE] Successfully download %s-%s', name, vers)
+                        else:
+                            self._logger.error('[CRATE] Failed to download %s-%s', name, vers)
+                    results.task_done()
+                    conn.commit()
 
-            try:
-                dlfile = self._session.get(url, timeout=30, proxies=self._proxy)
-            except Exception as e:
-                self._logger.error(e)
-                return False, False
-            if dlfile.status_code == 403:
-                return False, True
+        def worker(t):
+            '''
+            Worker threads to download crates
+            '''
 
-            filehash = hashlib.sha256(dlfile.content).hexdigest()
-            if filehash == cksum:
-                with open(fp, 'wb') as save:
-                    save.write(dlfile.content)
-                return True, False
-            return False, False
-
-        def prepare(name, vers, cksum):
-
+            name, vers, cksum = t
             self._logger.debug('Processing %s-%s', name, vers)
             if not cksum:
                 self._logger.error('[DATABASE] Empty checksum of %s-%s', name, vers)
-                return (None, None)
+                return None
+            add_result = lambda downloaded, forbidden: results.put((name, vers, downloaded, forbidden))
 
             pardir = os.path.join(self._crates_dir, name)
-            try:
+            if not os.path.isdir(pardir):
                 os.makedirs(pardir)
-            except OSError:
-                # directory already exists
-                pass
             fp = os.path.join(pardir, '{}-{}.crate'.format(name, vers))
             url = self._downloadURL.format(name=name, version=vers)
-            return (url, fp)
 
-        def retrive_crate(name, vers, cksum):
-
-            url, fp = prepare(name, vers, cksum)
-
-            if not all((url, fp)):
-                return
-
-            sql = "UPDATE crate SET {column} = ?, last_update = ? WHERE name = ? AND version = ?;"
-            downloaded, forbidden = dl_executor(url, cksum, fp)
+            if os.path.isfile(fp):
+                with open(fp, 'rb') as toverify:
+                    if hashlib.sha256(toverify.read()).hexdigest() == cksum:
+                        return add_result(True, False)
+                    else:
+                        os.remove(fp)
+                return add_result(False, False)
 
             try:
-                if forbidden:
-                    self._cursor.execute(sql.format(column="forbidden"),
-                                        (1, datetime.now(), name, vers))
-                    self._logger.warning('[UPSTREAM] %s-%s is forbidden', name, vers)
-                else:
-                    self._cursor.execute(sql.format(column="downloaded"),
-                                        (int(downloaded), datetime.now(), name, vers))
-                    self._logger.info('[CRATE] Successfully download %s-%s' if downloaded
-                                     else '[CRATE] Failed to download %s-%s', name, vers)
+                # requests will automatically decompresses gzip-encoded responses
+                resp = self._session.get(url, timeout=30, proxies=self._proxy, stream=True)
             except Exception as e:
                 self._logger.error(e)
+                return add_result(False, False)
+            if resp.status_code == 403:
+                return add_result(False, True)
 
-        def retrive_crate_multithread(info):
+            filehash = hashlib.sha256(resp.raw.data).hexdigest()
+            if filehash == cksum:
+                with open(fp, 'wb') as save:
+                    save.write(resp.raw.data)
+                return add_result(True, False)
+            return add_result(False, False)
 
-            def wrapped(t):
+        consumer = threading.Thread(target=save_result)
+        with ThreadPoolExecutor(cpu_count() * 3) as pool:
+            consumer.start()
+            pool.map(worker, self._cursor)
+            pool.shutdown(wait=True)
+        results.put(None)
 
-                url, fp = prepare(*t)
-                if url and fp:
-                    cksum = t[2]
-                    dl_executor(url, cksum, fp)
-
-            self._logger.info('[CRATE] Downloading all crates from crates.io...')
-            with ThreadPoolExecutor(cpu_count() * 3) as pool:
-                pool.map(wrapped, info)
-                pool.shutdown(wait=True)
-
-            self._logger.info('[DATABASE] Updating info of all downloaded crates...')
-            self.load_downloaded_crates()
-
-        cursor = self._conn.cursor()
-        cursor.execute("SELECT name, version, checksum FROM crate WHERE downloaded = 0 AND forbidden = 0;")
-
-        if self._bare:
-            retrive_crate_multithread(cursor)
-            self._bare = False
-        else:
-            foreach(lambda t: retrive_crate(*t), cursor)
+        consumer.join()
+        self._logger.info('[CRATE] Finished. Failed downloads, if there is any, will be retried next time.')
 
     def update_repo(self):
         """
@@ -387,6 +370,7 @@ class CratesMirror(object):
         self._logger.info("[REPO] Pulling from remote...")
         origin.pull()
         self._logger.debug("Lastest commit: %s", self._repo.commit())
+
         deletedList = []
         newfileList = []
         modifiedList = []
@@ -402,7 +386,7 @@ class CratesMirror(object):
             else:
                 modifiedList.append(diff.a_blob.abspath)
 
-        self._logger.info('[REPO] deleted: %s', deletedList)
+        self._logger.info('[REPO]  deleted: %s', deletedList)
         self._logger.info('[REPO] newfiles: %s', newfileList)
         self._logger.info('[REPO] modified: %s', modifiedList)
 
