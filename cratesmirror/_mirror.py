@@ -88,8 +88,8 @@ class CratesMirror(object):
 
         DEFAULT_CONFIG = {'api': 'https://crates.io', 'dl': 'https://crates.io/api/v1/crates'}
         if config is not None:
-            config.setdefault('api', DEFAULT_CONFIG['api'])
-            config.setdefault('dl', DEFAULT_CONFIG['dl'])
+            config['api'] = config.get('api', None) or DEFAULT_CONFIG['api']
+            config['dl'] = config.get('dl', None) or DEFAULT_CONFIG['dl']
             if config == DEFAULT_CONFIG:
                 config = None
         self._config = config

@@ -104,6 +104,13 @@ Note
 ChangeLog
 ---------------
 
+1.1.2
++++++++++++
+
+**Bugfix**
+
+- Replace None with default value in :code:`<RegistryDir>/config.json`
+
 1.1.1
 +++++++++++
 
