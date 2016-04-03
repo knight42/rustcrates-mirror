@@ -13,7 +13,6 @@ URL = "https://github.com/ustclug/LUG-crates_mirror"
 
 with open('README.rst', 'r') as f:
     readme = f.read()
-
 with open('cratesmirror/__init__.py', 'r') as fd:
     VERSION = re.search(r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]',
                         fd.read(), re.MULTILINE).group(1)
