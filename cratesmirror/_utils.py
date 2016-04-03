@@ -3,6 +3,11 @@
 from __future__ import print_function, unicode_literals, with_statement, division
 
 import os
+try:
+    import queue
+except ImportError:
+    import Queue as queue
+import time
 
 def walk_git(gitdir):
     for root, dirs, files in os.walk(gitdir):
@@ -26,12 +31,18 @@ def gen_lines(fp, latest_only=False):
 def foreach(f, *args):
     list(map(f, *args))
 
-def producer(gitdir):
-    for f in walk_git(gitdir):
-        for line in gen_lines(f):
-            pass
 
-if __name__ == '__main__':
-    d = '/home/knight/.cargo/registry/index/crates.mirrors.ustc.edu.cn-4496af6807a54617/'
-    for i in walk_git(d):
-        print(i)
+class TaskQueue(queue.Queue):
+
+    def __iter__(self):
+
+        while 1:
+            try:
+                item = self.get_nowait()
+            except queue.Empty:
+                time.sleep(2)
+            else:
+                if item is None:
+                    break
+                yield item
+

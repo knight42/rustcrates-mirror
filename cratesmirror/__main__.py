@@ -34,13 +34,14 @@ def main():
     parser.add_argument('-f', '--logfile', help='log file path', default=None)
     parser.add_argument('-c', '--checkdb', help='check database for missing crates',
                                            action='store_true')
-    parser.add_argument('-v', '--verbose', action='store_true')
+    parser.add_argument('-v', '--verbose', help='verbose output', action='store_true')
 
-    custom_config = {}
-    if os.getenv('CRATES_DL'):
-        custom_config['dl'] = os.getenv('CRATES_DL')
-    if os.getenv('CRATES_API'):
-        custom_config['api'] = os.getenv('CRATES_API')
+    custom_config = {
+        'dl': os.getenv('CRATES_DL'),
+        'api': os.getenv('CRATES_API')
+    }
+    if not any(custom_config.values()):
+        custom_config = None
 
     args = parser.parse_args()
 

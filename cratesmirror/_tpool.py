@@ -129,15 +129,3 @@ class ThreadPoolExecutor(object):
         self.shutdown(wait=True)
         return False
 
-
-if __name__ == '__main__':
-
-    import time
-    def test(n):
-        print('before', n)
-        time.sleep(n)
-        print('after', n**2)
-        raise IndexError('1234')
-
-    with ThreadPoolExecutor(10) as ex:
-        ex.map(test, range(5))
