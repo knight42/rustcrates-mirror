@@ -9,6 +9,7 @@ This project is initially inspired by [@tennix](https://github.com/tennix)'s [cr
 * [x] ~~download crates in a multi-threaded way if \<CratesDir> is empty~~
 * [x] ~~packaging~~
 * [x] ~~check database for missing crates~~
+* [x] ~~always download crates multi-threaded~~
 
 ## Prerequisities
 * Python >= 2.7.9
