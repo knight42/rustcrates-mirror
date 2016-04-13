@@ -104,6 +104,13 @@ Note
 ChangeLog
 ---------------
 
+1.1.3
++++++++++++
+
+**Bugfix**
+
+- Pick up all new crates in the modified index file, not only the latest
+
 1.1.2
 +++++++++++
 
