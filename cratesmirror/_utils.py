@@ -17,16 +17,10 @@ def walk_git(gitdir):
             if f != 'config.json':
                 yield os.path.join(root, f)
 
-def gen_lines(fp, latest_only=False):
+def gen_lines(fp):
     with open(fp, 'r') as json_file:
-        if latest_only:
-            last_line = ''
-            for line in json_file:
-                last_line = line
-            yield last_line
-        else:
-            for line in json_file:
-                yield line
+        for line in json_file:
+            yield line
 
 def foreach(f, *args):
     list(map(f, *args))
@@ -40,9 +34,10 @@ class TaskQueue(queue.Queue):
             try:
                 item = self.get_nowait()
             except queue.Empty:
-                time.sleep(2)
+                time.sleep(3)
             else:
                 if item is None:
+                    self.task_done()
                     break
                 yield item
 

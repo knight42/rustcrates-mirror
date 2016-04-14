@@ -10,7 +10,6 @@ import re
 import json
 import sqlite3
 import shutil
-import functools
 import hashlib
 import logging
 import threading
@@ -83,7 +82,7 @@ class CratesMirror(object):
         self._downloadURL = 'https://crates.io/api/v1/crates/{name}/{version}/download'
         self._index_dir = indexdir
         self._crates_dir = cratesdir
-        self._configPath = os.path.join(self._index_dir, 'config.json')
+        self._config_path = os.path.join(indexdir, 'config.json')
         self._session = requests.Session()
 
         DEFAULT_CONFIG = {'api': 'https://crates.io', 'dl': 'https://crates.io/api/v1/crates'}
@@ -161,30 +160,35 @@ class CratesMirror(object):
             self._logger.info('[REPO] Clone finished.')
         return git.Repo(self._index_dir)
 
-    def load_crate(self, fp, latest_only=False):
+    def load_crate(self, fp=None, data=None):
         """
         Load information of one crate into database
 
-        :param fp: file path string
-        :param latest_only: if set to be True, only the latest version of crate is considered
+        :param fp: file path
+        :param data: specify the data source(lines generator)
         :returns: True if success, otherwise False
 
         """
 
-        crates = []
-        for line in gen_lines(fp, latest_only):
-            try:
-                crate = json.loads(line)
-            except ValueError:
-                self._logger.error("[CRATE] Unknown data in %s: %s", fp, line)
-            else:
-                self._logger.info('[DATABASE] Load %s, %s, %s, %s',
-                                  crate["name"], crate["vers"],
-                                  crate["cksum"], int(crate["yanked"]))
-                crates.append((crate["name"], crate["vers"],
-                               crate["cksum"], int(crate["yanked"])))
+        if fp:
+            data = gen_lines(fp)
+        elif data is None:
+            raise ValueError('Need to provide data')
 
-        return self._insert_db(*crates);
+        def crates():
+            for line in data:
+                try:
+                    crate = json.loads(line)
+                except ValueError:
+                    self._logger.error("[CRATE] Unknown data: %s", line)
+                else:
+                    self._logger.info('[DATABASE] Load %s, %s, %s, %s',
+                                      crate["name"], crate["vers"],
+                                      crate["cksum"], int(crate["yanked"]))
+                    yield (crate["name"], crate["vers"],
+                           crate["cksum"], int(crate["yanked"]))
+
+        return self._insert_db(crates());
 
     def load_crates_from_index(self, force=False):
         """
@@ -236,7 +240,7 @@ class CratesMirror(object):
         Information is grasped from local database.
 
         :param: None
-        :returns: None
+        :returns: True if all downloads succeed, otherwise False
 
         """
 
@@ -244,6 +248,7 @@ class CratesMirror(object):
 
         self._cursor.execute("SELECT name, version, checksum FROM crate WHERE downloaded = 0 AND forbidden = 0;")
         results = TaskQueue()
+        cnt = {'success': 0, 'fail': 0}
 
         def save_result():
             '''
@@ -268,21 +273,25 @@ class CratesMirror(object):
                     else:
                         if downloaded:
                             self._logger.info('[CRATE] Successfully download %s-%s', name, vers)
+                            cnt['success'] += 1
                         else:
                             self._logger.error('[CRATE] Failed to download %s-%s', name, vers)
+                            cnt['fail'] += 1
                     results.task_done()
                     conn.commit()
 
         def worker(t):
             '''
             Worker threads to download crates
+
+            :param: (name, version, checksum)
+            :returns: None
             '''
 
             name, vers, cksum = t
             self._logger.debug('Processing %s-%s', name, vers)
             if not cksum:
-                self._logger.error('[DATABASE] Empty checksum of %s-%s', name, vers)
-                return None
+                return self._logger.error('[DATABASE] Empty checksum of %s-%s', name, vers)
             add_result = lambda downloaded, forbidden: results.put((name, vers, downloaded, forbidden))
 
             pardir = os.path.join(self._crates_dir, name)
@@ -297,7 +306,6 @@ class CratesMirror(object):
                         return add_result(True, False)
                     else:
                         os.remove(fp)
-                return add_result(False, False)
 
             try:
                 # requests will automatically decompresses gzip-encoded responses
@@ -323,7 +331,10 @@ class CratesMirror(object):
         results.put(None)
 
         consumer.join()
-        self._logger.info('[CRATE] Finished. Failed downloads, if there is any, will be retried next time.')
+        self._logger.info('[CRATE] Finished. %s succeeded, %s failed.', cnt['success'], cnt['fail'])
+        if cnt['fail']:
+            return False
+        return True
 
     def update_repo(self):
         """
@@ -340,36 +351,42 @@ class CratesMirror(object):
                 self._repo.head.reset('origin/master')
 
         def commit_custom_config():
-            if not self._config:
+            if self._config is None:
                 return
-            with open(self._configPath, 'w') as save:
+            with open(self._config_path, 'w') as save:
                 json.dump(self._config, save, indent=4)
-            self._repo.index.add([self._configPath])
+            self._repo.index.add(['config.json'])
             self._repo.index.commit('point to local server')
+
+        def new_crates(last, latest):
+            # no bytes
+            for line in filter(lambda s: s.startswith('+{'),
+                    self._repo.git.execute(['git', 'diff', '-U0', last, latest]).split(os.linesep)):
+                yield line[1:] # skip '+'
 
         self._cursor.execute("SELECT commit_id FROM update_history ORDER BY datetime(timestamp) DESC LIMIT 1;")
         last_update = self._cursor.fetchone()
+
+        reset_head()
+
         if not last_update:
             # bare repo
-            reset_head()
             self.retrive_crates()
             self._cursor.execute("INSERT OR REPLACE INTO update_history (commit_id, timestamp) VALUES (?, ?);",
                                 (str(self._repo.commit()), datetime.now()))
             self._conn.commit()
-            commit_custom_config()
-            return
+            return commit_custom_config()
         else:
             last_update = last_update[0]
 
         self._logger.info("[REPO] Updating %s", self._index_dir)
         self._logger.debug("Last commit: %s", last_update)
 
-        reset_head()
-
         origin = self._repo.remotes['origin']
         self._logger.info("[REPO] Pulling from remote...")
         origin.pull()
-        self._logger.debug("Lastest commit: %s", self._repo.commit())
+        latest = str(self._repo.commit())
+        self._logger.debug("Lastest commit: %s", latest)
 
         deletedList = []
         newfileList = []
@@ -393,15 +410,14 @@ class CratesMirror(object):
         if deletedList:
             self._cursor.executemany("DELETE FROM crate WHERE name = ?", deletedList)
             self._conn.commit()
-        foreach(self.load_crate, newfileList)
-        foreach(functools.partial(self.load_crate, latest_only=True), modifiedList)
+        self.load_crate(data=new_crates(last_update, latest))
 
         self.retrive_crates()
 
         foreach(shutil.rmtree, [os.path.join(self._crates_dir, f[0]) for f in deletedList])
 
         self._cursor.execute("INSERT OR REPLACE INTO update_history (commit_id, timestamp) VALUES (?, ?);",
-                            (str(self._repo.commit()), datetime.now()))
+                            (latest, datetime.now()))
 
         commit_custom_config()
 
@@ -409,7 +425,7 @@ class CratesMirror(object):
 
         self._logger.info('[REPO] Already up-to-date.')
 
-    def _insert_db(self, *crates):
+    def _insert_db(self, crates):
 
         sql = "INSERT OR REPLACE INTO crate (name, version, checksum, yanked) VALUES (?, ?, ?, ?);"
         try:
@@ -430,29 +446,30 @@ class CratesMirror(object):
 
         """
 
-        crates = []
         query = 'SELECT name FROM crate WHERE name = ? AND version = ?;'
         self._logger.info("[DATABASE] Checking database for missing crates, please be patient...")
-        for fp in walk_git(self._index_dir):
-            for line in gen_lines(fp):
-                try:
-                    crate = json.loads(line)
-                except ValueError:
-                    self._logger.error("[CRATE] Unknown data in %s: %s", fp, line)
-                else:
-                    # cannot execute SELECT statements in executemany()
-                    self._cursor.execute(query, (crate['name'], crate['vers']))
-                    if not self._cursor.fetchone():
-                        self._logger.error("[DATABASE] Missing crate: %s-%s",
-                                           crate['name'], crate['vers'])
-                        crates.append((crate['name'], crate['vers'],
-                                       crate['cksum'], int(crate['yanked'])))
-        missing = len(crates)
-        if crates:
-            self._logger.info("[DATABASE] The following will be inserted: %s", crates)
-            self._insert_db(*crates)
-        self._logger.info("[DATABASE] Finished. %s", '{} crates are missing'.format(missing) if missing \
-                                                else 'Everything is fine')
+        missing = {'cnt': 0}
+        def crates():
+            # avoid recursive use of cursors
+            cursor = self._conn.cursor()
+            for fp in walk_git(self._index_dir):
+                for line in gen_lines(fp):
+                    try:
+                        crate = json.loads(line)
+                    except ValueError:
+                        self._logger.error("[CRATE] Unknown data in %s: %s", fp, line)
+                    else:
+                        # cannot execute SELECT statements in executemany()
+                        cursor.execute(query, (crate['name'], crate['vers']))
+                        if not cursor.fetchone():
+                            self._logger.error("[DATABASE] Missing crate: %s-%s",
+                                               crate['name'], crate['vers'])
+                            missing['cnt'] += 1
+                            yield (crate['name'], crate['vers'],
+                                   crate['cksum'], int(crate['yanked']))
+        self._insert_db(crates())
+        self._logger.info("[DATABASE] Finished. %s",
+                          '{} crates are missing'.format(missing['cnt']))
 
     def __enter__(self):
 
