@@ -1,0 +1,7 @@
+*.swp
+*.[oa]
+*.py[co]
+*~
+*.bac
+*.db
+target
