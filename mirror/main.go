@@ -1,4 +1,4 @@
-package main
+package mirror
 
 import (
 	"database/sql"
@@ -9,7 +9,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path"
 )
 
 type CratesMirror struct {
@@ -81,7 +80,7 @@ func (self *CratesMirror) initRepo() error {
 		}
 	}
 	cmd := exec.Command("git", "clone", "https://github.com/rust-lang/crates.io-index", self.indexDir)
-	err := cmd.Run()
+	err = cmd.Run()
 	if err != nil {
 		self.logger.Println("[REPO] Clone finished.")
 	}
