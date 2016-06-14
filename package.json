@@ -1,0 +1,31 @@
+{
+  "name": "cratesmirror",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ustclug/lug-cratesmirror.git"
+  },
+  "dependencies": {
+    "co": "^4.6.0",
+    "debug": "^2.2.0",
+    "koa": "^2.0.0",
+    "koa-convert": "^1.2.0",
+    "koa-json": "^1.1.1",
+    "koa-logger": "^1.3.0",
+    "koa-onerror": "^1.2.1",
+    "koa-router": "^7.0.0",
+    "runkoa": "^1.3.1"
+  },
+  "keywords": [],
+  "author": "knight_42 <anonymousknight96@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ustclug/lug-cratesmirror/issues"
+  },
+  "homepage": "https://github.com/ustclug/lug-cratesmirror#readme"
+}
