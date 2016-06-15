@@ -4,22 +4,20 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node --harmony index.js"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ustclug/lug-cratesmirror.git"
   },
   "dependencies": {
-    "co": "^4.6.0",
-    "debug": "^2.2.0",
+    "babel-core": "^6.0.20",
+    "babel-polyfill": "^6.0.16",
+    "babel-preset-es2015": "^6.0.15",
+    "babel-preset-stage-0": "^6.0.15",
+    "bluebird": "^3.4.0",
     "koa": "^2.0.0",
-    "koa-convert": "^1.2.0",
-    "koa-json": "^1.1.1",
-    "koa-logger": "^1.3.0",
-    "koa-onerror": "^1.2.1",
-    "koa-router": "^7.0.0",
-    "runkoa": "^1.3.1"
+    "koa-router": "^7.0.0"
   },
   "keywords": [],
   "author": "knight_42 <anonymousknight96@gmail.com>",
@@ -27,5 +25,8 @@
   "bugs": {
     "url": "https://github.com/ustclug/lug-cratesmirror/issues"
   },
-  "homepage": "https://github.com/ustclug/lug-cratesmirror#readme"
+  "homepage": "https://github.com/ustclug/lug-cratesmirror#readme",
+  "engines": {
+    "node": ">=5"
+  }
 }
