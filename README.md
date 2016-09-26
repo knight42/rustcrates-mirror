@@ -20,25 +20,20 @@ server {
 
     proxy_buffering on;
     proxy_ssl_server_name on;
-    proxy_read_timeout 90s;
+    proxy_connect_timeout 10s;
 
     proxy_cache STATIC;
     proxy_cache_valid 200 12h;
-    proxy_cache_valid 400 504 1m;
+    proxy_cache_valid 400 502 504 1m;
     proxy_cache_valid any 5m;
     proxy_cache_revalidate on;
     proxy_cache_use_stale error timeout invalid_header updating http_500 http_502 http_503 http_504;
 
-    location / {
-        proxy_pass https://crates.io;
-        proxy_redirect https://crates-io.s3-us-west-1.amazonaws.com/ /;
-        error_page 504 =302 https://crates.io$request_uri;
-
-    }
-
-    location /crates/ {
+    location /api/v1/crates {
+        rewrite ^/api/v1/crates/([^/]+)/([^/]+)/download$ /crates/$1/$1-$2.crate break;
+        error_page 500 502 504 =302 https://crates-io.s3-us-west-1.amazonaws.com$uri;
         proxy_pass https://crates-io.s3-us-west-1.amazonaws.com;
-        error_page 504 =302 https://crates-io.s3-us-west-1.amazonaws.com$request_uri;
     }
+
 }
 ```
